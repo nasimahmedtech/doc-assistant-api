@@ -1,0 +1,1 @@
+from app.model.document import Document,Chunk
