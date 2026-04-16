@@ -2,17 +2,15 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
 
-from sqlalchemy import pool
+from sqlalchemy import pool, create_engine, text
 from app.db.base import Base
 import os
 import sys
 from app.core.config import settings
-from app.db.session import create_engine
-from app.model.document import Document,Chunk
 
 from alembic import context
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+#sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 
@@ -72,6 +70,7 @@ def run_migrations_online() -> None:
     connectable = create_engine(settings.SQLALCHEMY_DATABASE_URL)
 
     with connectable.connect() as connection:
+         
         context.configure(
             connection=connection, target_metadata=target_metadata
         )
