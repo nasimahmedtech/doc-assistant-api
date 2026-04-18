@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     REDIS_HOST: str = 'redis'
     REDIS_PORT: int = "6379"
     GROQ_API: str
+    RETRIEVAL_DISTANCE_THRESHOLD: float = 0.4
 
     
     model_config = SettingsConfigDict(

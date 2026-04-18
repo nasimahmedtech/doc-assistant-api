@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+import asyncio
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.schema.query import QueryResponse,ChunkResultStructured
@@ -6,37 +7,45 @@ from app.schema.chat import ChatRequest,ChatResponse
 from app.api.deps import get_db
 from app.utils.embedding import embed_text
 from app.llm import generate_answer
+from app.core.config import settings
+from app.utils.retrieval import retrieve_relevant_chunks
+from app.core.limiter import limiter
+from fastapi import Request
+from app.cache import get_cache_response,set_cache_response
 router = APIRouter()
 
 @router.post("/",response_model= ChatResponse)
-def user_query(*,db: Session = Depends(get_db),payload: ChatRequest):
-    query_embeddings = embed_text(payload.question)
-    db.execute(text("SET ivfflat.probes = 3"))
+@limiter.limit("10/minute")
+async def user_query(*,request: Request,db: Session = Depends(get_db),payload: ChatRequest):
+    cache = get_cache_response(payload.question)
+    if cache:
+        return ChatResponse(**cache)
 
-    chunks = db.execute(text("""SELECT
-                              c.id,
-                              c.chunk_index,
-                              c.content,
-                              c.document_id,
-                              d.title AS document_title,
-                              c.embedding <-> CAST(:qvec AS Vector) AS distance
 
-                              FROM chunks c
-                              JOIN documents d ON d.id = c.document_id
-                              ORDER by c.embedding <-> CAST(:qvec AS Vector)
-                              LIMIT :top_k 
-                              """),{
-                                  "qvec": str(query_embeddings),
-                                  "top_k": payload.top_k
-                                  
-                              }).fetchall()
+    relevent,filtered_count =await retrieve_relevant_chunks(
+        question=payload.question,
+        top_k=payload.top_k,
+        threshold=payload.threshlod,
+        db=db
+    )
+
+
+
+    if not relevent:
+        return ChatRequest(
+            question=payload.question,
+            answer = "I cound not find relevent information in the document",
+            source = [],
+            filtered_count = filtered_count 
+        )
     
-    chunk_content = [chunk.content for chunk in chunks]
-    answer=generate_answer(payload.question,chunk_content)
+    chunk_content = [chunk.content for chunk in relevent]
+    answer= await asyncio.to_thread(generate_answer,payload.question,chunk_content)
 
-    return ChatResponse(
+    response = ChatResponse(
         question=payload.question,
         answer=answer,
+        filtered_count= filtered_count,
         source=[
             ChunkResultStructured(
                 chunk_index = chunk.chunk_index,
@@ -46,10 +55,13 @@ def user_query(*,db: Session = Depends(get_db),payload: ChatRequest):
                 document_title = chunk.document_title
 
             )
-            for chunk in chunks
+            for chunk in relevent
         ]
 
     )
+    set_cache_response(payload.question,response.model_dump())
+    return response
+    
 
     
     
